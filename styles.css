@@ -1,0 +1,284 @@
+:root {
+  --bg-start: #fdf8ff;
+  --bg-end: #f5fbff;
+  --card: #ffffff;
+  --text: #453b50;
+  --muted: #7f7692;
+  --primary: #e59ac0;
+  --primary-strong: #d784ac;
+  --soft-btn: #e9e6fa;
+  --line: #e9deee;
+  --chip: #f9ecf5;
+  --accent-a: #f4dce8;
+  --accent-b: #ddefff;
+  --accent-c: #e4f6ec;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(180deg, var(--bg-start) 0%, var(--bg-end) 100%);
+  color: var(--text);
+}
+
+.app {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 16px 40px;
+}
+
+.top-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.hero p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.hero {
+  flex: 1;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  margin-top: 14px;
+  box-shadow: 0 6px 20px rgba(179, 123, 160, 0.08);
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+}
+
+.user-panel {
+  position: static;
+  width: 360px;
+  padding: 12px;
+  background: linear-gradient(180deg, #fff 0%, #faf7ff 100%);
+  margin-top: 0;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  margin-top: 8px;
+}
+
+input[type="text"],
+input[type="file"] {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 9px;
+  font-size: 0.86rem;
+  background: #fff;
+}
+
+.btn {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 13px;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.btn.primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn.primary:hover {
+  background: var(--primary-strong);
+}
+
+.btn.soft {
+  background: var(--soft-btn);
+  color: #555078;
+}
+
+.btn.soft:hover {
+  background: #dfdaf6;
+}
+
+.active-user {
+  min-height: 28px;
+  color: var(--text);
+}
+
+.profile-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.profile-editor-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.profile-editor-row label {
+  margin-top: 0;
+  min-width: 110px;
+  flex: 1;
+}
+
+.profile-editor-row .btn {
+  margin-top: 0;
+  width: auto;
+  white-space: nowrap;
+}
+
+.hidden {
+  display: none;
+}
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#weekRange {
+  color: var(--muted);
+}
+
+.week-card {
+  margin-top: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+}
+
+.week-list {
+  display: grid;
+  gap: 10px;
+}
+
+.day-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: linear-gradient(90deg, var(--accent-a) 0%, var(--accent-b) 45%, var(--accent-c) 100%);
+}
+
+.day-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.day-subtitle {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.day-right {
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.check-btn {
+  background: #e5f0fb;
+  color: #456a8a;
+}
+
+.check-btn:hover {
+  background: #d8e8f8;
+}
+
+.check-btn.checked {
+  background: #d9f1e4;
+  color: #2f6d4a;
+}
+
+.checkin-users {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--chip);
+  border: 1px solid #f1d4e4;
+  border-radius: 999px;
+  padding: 5px 10px 5px 6px;
+  font-size: 0.85rem;
+}
+
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid #fff;
+  background: #fff;
+}
+
+.empty-text {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 640px) {
+  .top-row {
+    flex-direction: column;
+  }
+
+  .user-panel {
+    width: 100%;
+  }
+
+  .profile-editor-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .profile-editor-row .btn {
+    width: 100%;
+  }
+
+  .day-item {
+    flex-direction: column;
+  }
+
+  .day-right {
+    width: 100%;
+    min-width: 0;
+    align-items: flex-start;
+  }
+
+  .checkin-users {
+    justify-content: flex-start;
+  }
+}

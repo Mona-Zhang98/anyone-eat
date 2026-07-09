@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>今天有人一起吃饭吗~</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app">
+    <div class="top-row">
+      <header class="hero">
+        <h1>今天有人一起吃饭吗~</h1>
+        <p>本周工作日打卡，看看今天谁可以一起吃饭。</p>
+      </header>
+
+      <section class="user-panel card">
+        <div id="profileDisplay" class="profile-display hidden">
+          <div id="activeUserBox" class="active-user"></div>
+          <button id="editProfileBtn" class="btn soft">修改</button>
+        </div>
+
+        <div id="profileEditor" class="profile-editor">
+          <h2>创建用户</h2>
+          <div class="profile-editor-row">
+            <label>
+              名字
+              <input id="nameInput" type="text" maxlength="20" placeholder="输入你的名字" />
+            </label>
+            <label>
+              头像
+              <input id="avatarInput" type="file" accept="image/*" />
+            </label>
+            <button id="saveProfileBtn" class="btn primary">保存</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="card week-card">
+      <div class="row-between">
+        <h2>本周工作日</h2>
+        <small id="weekRange"></small>
+      </div>
+      <div id="weekList" class="week-list"></div>
+    </section>
+  </main>
+
+  <template id="dayTemplate">
+    <article class="day-item">
+      <div>
+        <h3 class="day-title"></h3>
+        <p class="day-subtitle"></p>
+      </div>
+      <div class="day-right">
+        <button class="btn check-btn">我要一起吃饭</button>
+        <div class="checkin-users"></div>
+      </div>
+    </article>
+  </template>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./script.js"></script>
+</body>
+</html>
