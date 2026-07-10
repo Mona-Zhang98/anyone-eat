@@ -16,6 +16,8 @@ const dayTemplate = document.getElementById("dayTemplate");
 
 const weekdays = ["周一", "周二", "周三", "周四", "周五"];
 let weekCheckinsMap = {};
+const STATUS_LUNCH = "lunch";
+const STATUS_VACATION = "vacation";
 
 function getMonday(date = new Date()) {
   const d = new Date(date);
@@ -24,6 +26,20 @@ function getMonday(date = new Date()) {
   d.setDate(d.getDate() + diff);
   d.setHours(0, 0, 0, 0);
   return d;
+}
+
+function getEffectiveNow() {
+  const now = new Date();
+  const day = now.getDay(); // 5 = Friday
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const isAfterFridayNoon = day === 5 && (hour > 12 || (hour === 12 && minute >= 1));
+  if (!isAfterFridayNoon) {
+    return now;
+  }
+  const shifted = new Date(now);
+  shifted.setDate(shifted.getDate() + 7);
+  return shifted;
 }
 
 function formatDate(date) {
@@ -40,7 +56,7 @@ function dateKey(date) {
 }
 
 function getWeekDays() {
-  const monday = getMonday();
+  const monday = getMonday(getEffectiveNow());
   const days = [];
   for (let i = 0; i < 5; i += 1) {
     const d = new Date(monday);
@@ -51,7 +67,7 @@ function getWeekDays() {
 }
 
 function currentWeekKey() {
-  return dateKey(getMonday());
+  return dateKey(getMonday(getEffectiveNow()));
 }
 
 function getOrCreateUserId() {
@@ -127,6 +143,7 @@ function renderUsers(container, users) {
     container.appendChild(empty);
     return;
   }
+
   users.forEach((u) => {
     const chip = document.createElement("span");
     chip.className = "user-chip";
@@ -136,6 +153,22 @@ function renderUsers(container, users) {
     chip.appendChild(name);
     container.appendChild(chip);
   });
+}
+
+function splitByStatus(users) {
+  const result = {
+    lunch: [],
+    vacation: []
+  };
+  users.forEach((u) => {
+    const status = u.check_status || STATUS_LUNCH;
+    if (status === STATUS_VACATION) {
+      result.vacation.push(u);
+    } else {
+      result.lunch.push(u);
+    }
+  });
+  return result;
 }
 
 function renderWeek() {
@@ -152,24 +185,38 @@ function renderWeek() {
     const dayItem = fragment.querySelector(".day-item");
     const title = fragment.querySelector(".day-title");
     const subtitle = fragment.querySelector(".day-subtitle");
-    const button = fragment.querySelector(".check-btn");
-    const usersEl = fragment.querySelector(".checkin-users");
+    const vacationBtn = fragment.querySelector(".vacation-btn");
+    const lunchBtn = fragment.querySelector(".lunch-btn");
+    const vacationUsersEl = fragment.querySelector(".vacation-users");
+    const lunchUsersEl = fragment.querySelector(".lunch-users");
 
     title.textContent = `${formatDate(date)} ${weekdays[i]}`;
     subtitle.textContent = "午饭团打卡";
 
-    const meChecked = users.some((u) => u.user_id === state.currentUser.id);
-    if (meChecked) {
-      button.classList.add("checked");
-      button.textContent = "已打卡（再点取消）";
+    const grouped = splitByStatus(users);
+    const meRecord = users.find((u) => u.user_id === state.currentUser.id);
+
+    if (meRecord && (meRecord.check_status || STATUS_LUNCH) === STATUS_VACATION) {
+      vacationBtn.classList.add("checked");
+      vacationBtn.textContent = "已休假（再点取消）";
     }
-    button.addEventListener("click", () => {
-      toggleCheckIn(key).catch(() => {
+    if (meRecord && (meRecord.check_status || STATUS_LUNCH) === STATUS_LUNCH) {
+      lunchBtn.classList.add("checked");
+      lunchBtn.textContent = "已打卡（再点取消）";
+    }
+    vacationBtn.addEventListener("click", () => {
+      toggleCheckIn(key, STATUS_VACATION).catch(() => {
+        alert("打卡失败，请稍后重试。");
+      });
+    });
+    lunchBtn.addEventListener("click", () => {
+      toggleCheckIn(key, STATUS_LUNCH).catch(() => {
         alert("打卡失败，请稍后重试。");
       });
     });
 
-    renderUsers(usersEl, users);
+    renderUsers(vacationUsersEl, grouped.vacation);
+    renderUsers(lunchUsersEl, grouped.lunch);
     weekListEl.appendChild(dayItem);
   });
 }
@@ -192,7 +239,7 @@ async function loadWeekCheckins() {
 
   const { data, error } = await supabaseClient
     .from("lunch_checkins")
-    .select("id, week_key, check_date, user_id, user_name, avatar_url, created_at")
+    .select("id, week_key, check_date, user_id, user_name, avatar_url, check_status, created_at")
     .eq("week_key", currentWeekKey())
     .gte("check_date", start)
     .lte("check_date", end)
@@ -206,7 +253,7 @@ async function loadWeekCheckins() {
   renderWeek();
 }
 
-async function toggleCheckIn(dayKey) {
+async function toggleCheckIn(dayKey, targetStatus) {
   const name = state.currentUser.name.trim();
   if (!name) {
     alert("请先在“创建用户”里保存名字。");
@@ -215,8 +262,9 @@ async function toggleCheckIn(dayKey) {
 
   const users = weekCheckinsMap[dayKey] || [];
   const existing = users.find((u) => u.user_id === state.currentUser.id);
+  const existingStatus = existing ? (existing.check_status || STATUS_LUNCH) : null;
 
-  if (existing) {
+  if (existing && existingStatus === targetStatus) {
     const { error } = await supabaseClient
       .from("lunch_checkins")
       .delete()
@@ -226,16 +274,28 @@ async function toggleCheckIn(dayKey) {
       throw error;
     }
   } else {
+    if (existing && existingStatus !== targetStatus) {
+      const { error: deleteError } = await supabaseClient
+        .from("lunch_checkins")
+        .delete()
+        .eq("check_date", dayKey)
+        .eq("user_id", state.currentUser.id);
+      if (deleteError) {
+        throw deleteError;
+      }
+    }
+
     const payload = {
       week_key: currentWeekKey(),
       check_date: dayKey,
       user_id: state.currentUser.id,
       user_name: state.currentUser.name.trim(),
-      avatar_url: state.currentUser.avatar || ""
+      avatar_url: state.currentUser.avatar || "",
+      check_status: targetStatus
     };
     const { error } = await supabaseClient
       .from("lunch_checkins")
-      .upsert(payload, { onConflict: "check_date,user_id" });
+      .insert(payload);
     if (error) {
       throw error;
     }

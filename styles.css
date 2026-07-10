@@ -196,31 +196,55 @@ input[type="file"] {
 }
 
 .day-right {
-  min-width: 240px;
+  min-width: 320px;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 8px;
 }
 
-.check-btn {
+.check-columns {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.check-column {
+  flex: 1;
+}
+
+.lunch-btn {
   background: #e5f0fb;
   color: #456a8a;
 }
 
-.check-btn:hover {
+.lunch-btn:hover {
   background: #d8e8f8;
 }
 
-.check-btn.checked {
+.lunch-btn.checked {
   background: #d9f1e4;
   color: #2f6d4a;
+}
+
+.vacation-btn {
+  background: #f8eadb;
+  color: #8d5d38;
+}
+
+.vacation-btn:hover {
+  background: #f4e0cb;
+}
+
+.vacation-btn.checked {
+  background: #ffe3bd;
+  color: #7a4a26;
 }
 
 .checkin-users {
   width: 100%;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -278,7 +302,13 @@ input[type="file"] {
     align-items: flex-start;
   }
 
+  .check-columns {
+    width: 100%;
+    flex-direction: column;
+  }
+
   .checkin-users {
     justify-content: flex-start;
   }
+
 }
