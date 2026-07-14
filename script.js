@@ -13,12 +13,22 @@ const activeUserBox = document.getElementById("activeUserBox");
 const profileDisplay = document.getElementById("profileDisplay");
 const profileEditor = document.getElementById("profileEditor");
 const dayTemplate = document.getElementById("dayTemplate");
+const dogCelebrationEl = document.getElementById("dogCelebration");
+const dogMessageEl = document.getElementById("dogMessage");
 
 const weekdays = ["周一", "周二", "周三", "周四", "周五"];
 let weekCheckinsMap = {};
 const STATUS_LUNCH = "lunch";
 const STATUS_BUSY = "busy";
 const STATUS_VACATION = "vacation";
+const FALLBACK_REFRESH_MS = 8000;
+const pendingCheckins = new Set();
+const localSyncChannel = "BroadcastChannel" in window
+  ? new BroadcastChannel("anyone-eat-checkins")
+  : null;
+let loadRequestId = 0;
+let refreshTimer = null;
+let dogAnimationTimer = null;
 
 function getMonday(date = new Date()) {
   const d = new Date(date);
@@ -175,6 +185,32 @@ function splitByStatus(users) {
   return result;
 }
 
+function setCheckButtonState(button, isChecked, checkedTitle) {
+  button.classList.toggle("checked", isChecked);
+  button.setAttribute("aria-pressed", String(isChecked));
+  button.title = isChecked ? checkedTitle : "点击打卡";
+}
+
+function showDogCelebration(status) {
+  const messages = {
+    [STATUS_LUNCH]: "YAY!",
+    [STATUS_BUSY]: "好吧...",
+    [STATUS_VACATION]: "你要去哪里玩!"
+  };
+
+  window.clearTimeout(dogAnimationTimer);
+  dogCelebrationEl.hidden = true;
+  dogCelebrationEl.className = `dog-celebration dog-${status}`;
+  dogMessageEl.textContent = messages[status];
+  void dogCelebrationEl.offsetWidth;
+  dogCelebrationEl.hidden = false;
+
+  const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 1100 : 1750;
+  dogAnimationTimer = window.setTimeout(() => {
+    dogCelebrationEl.hidden = true;
+  }, duration);
+}
+
 function renderWeek() {
   const days = getWeekDays();
   const first = formatDate(days[0]);
@@ -201,19 +237,15 @@ function renderWeek() {
 
     const grouped = splitByStatus(users);
     const meRecord = users.find((u) => u.user_id === state.currentUser.id);
+    const meStatus = meRecord ? (meRecord.check_status || STATUS_LUNCH) : null;
+    const isPending = pendingCheckins.has(dayKeyForUser(key));
 
-    if (meRecord && (meRecord.check_status || STATUS_LUNCH) === STATUS_VACATION) {
-      vacationBtn.classList.add("checked");
-      vacationBtn.textContent = "已休假（再点取消）";
-    }
-    if (meRecord && (meRecord.check_status || STATUS_LUNCH) === STATUS_LUNCH) {
-      lunchBtn.classList.add("checked");
-      lunchBtn.textContent = "已打卡（再点取消）";
-    }
-    if (meRecord && (meRecord.check_status || STATUS_LUNCH) === STATUS_BUSY) {
-      busyBtn.classList.add("checked");
-      busyBtn.textContent = "已有约（再点取消）";
-    }
+    setCheckButtonState(vacationBtn, meStatus === STATUS_VACATION, "已休假，再点一次取消");
+    setCheckButtonState(lunchBtn, meStatus === STATUS_LUNCH, "已打卡，再点一次取消");
+    setCheckButtonState(busyBtn, meStatus === STATUS_BUSY, "已有约，再点一次取消");
+    vacationBtn.disabled = isPending;
+    lunchBtn.disabled = isPending;
+    busyBtn.disabled = isPending;
     vacationBtn.addEventListener("click", () => {
       toggleCheckIn(key, STATUS_VACATION).catch(() => {
         alert("打卡失败，请稍后重试。");
@@ -249,6 +281,7 @@ function rebuildWeekMap(rows) {
 }
 
 async function loadWeekCheckins() {
+  const requestId = ++loadRequestId;
   const days = getWeekDays();
   const start = dateKey(days[0]);
   const end = dateKey(days[4]);
@@ -265,8 +298,54 @@ async function loadWeekCheckins() {
     throw error;
   }
 
+  if (requestId !== loadRequestId) {
+    return;
+  }
+
   rebuildWeekMap(data || []);
   renderWeek();
+}
+
+function dayKeyForUser(dayKey) {
+  return `${dayKey}:${state.currentUser.id}`;
+}
+
+function applyOptimisticCheckin(dayKey, targetStatus, shouldRemove) {
+  const currentUsers = weekCheckinsMap[dayKey] || [];
+  const otherUsers = currentUsers.filter((user) => user.user_id !== state.currentUser.id);
+
+  weekCheckinsMap = {
+    ...weekCheckinsMap,
+    [dayKey]: shouldRemove
+      ? otherUsers
+      : [
+          ...otherUsers,
+          {
+            id: `optimistic-${state.currentUser.id}-${dayKey}`,
+            week_key: currentWeekKey(),
+            check_date: dayKey,
+            user_id: state.currentUser.id,
+            user_name: state.currentUser.name.trim(),
+            avatar_url: state.currentUser.avatar || "",
+            check_status: targetStatus,
+            created_at: new Date().toISOString()
+          }
+        ]
+  };
+  renderWeek();
+}
+
+function scheduleWeekRefresh(delay = 120) {
+  window.clearTimeout(refreshTimer);
+  refreshTimer = window.setTimeout(() => {
+    if (pendingCheckins.size > 0) {
+      scheduleWeekRefresh(250);
+      return;
+    }
+    loadWeekCheckins().catch((error) => {
+      console.warn("同步打卡数据失败，将在下一次自动刷新时重试。", error);
+    });
+  }, delay);
 }
 
 async function toggleCheckIn(dayKey, targetStatus) {
@@ -279,45 +358,67 @@ async function toggleCheckIn(dayKey, targetStatus) {
   const users = weekCheckinsMap[dayKey] || [];
   const existing = users.find((u) => u.user_id === state.currentUser.id);
   const existingStatus = existing ? (existing.check_status || STATUS_LUNCH) : null;
+  const pendingKey = dayKeyForUser(dayKey);
+  const shouldRemove = Boolean(existing && existingStatus === targetStatus);
+  const previousUsers = [...users];
 
-  if (existing && existingStatus === targetStatus) {
-    const { error } = await supabaseClient
-      .from("lunch_checkins")
-      .delete()
-      .eq("check_date", dayKey)
-      .eq("user_id", state.currentUser.id);
-    if (error) {
-      throw error;
-    }
-  } else {
-    if (existing && existingStatus !== targetStatus) {
-      const { error: deleteError } = await supabaseClient
+  if (pendingCheckins.has(pendingKey)) {
+    return;
+  }
+
+  pendingCheckins.add(pendingKey);
+  loadRequestId += 1;
+  applyOptimisticCheckin(dayKey, targetStatus, shouldRemove);
+
+  try {
+    if (shouldRemove) {
+      const { error } = await supabaseClient
         .from("lunch_checkins")
         .delete()
         .eq("check_date", dayKey)
         .eq("user_id", state.currentUser.id);
-      if (deleteError) {
-        throw deleteError;
+      if (error) {
+        throw error;
+      }
+    } else {
+      const payload = {
+        week_key: currentWeekKey(),
+        check_date: dayKey,
+        user_id: state.currentUser.id,
+        user_name: state.currentUser.name.trim(),
+        avatar_url: state.currentUser.avatar || "",
+        check_status: targetStatus
+      };
+
+      const query = existing
+        ? supabaseClient
+            .from("lunch_checkins")
+            .update(payload)
+            .eq("check_date", dayKey)
+            .eq("user_id", state.currentUser.id)
+        : supabaseClient.from("lunch_checkins").insert(payload);
+      const { error } = await query;
+      if (error) {
+        throw error;
       }
     }
 
-    const payload = {
-      week_key: currentWeekKey(),
-      check_date: dayKey,
-      user_id: state.currentUser.id,
-      user_name: state.currentUser.name.trim(),
-      avatar_url: state.currentUser.avatar || "",
-      check_status: targetStatus
-    };
-    const { error } = await supabaseClient
-      .from("lunch_checkins")
-      .insert(payload);
-    if (error) {
-      throw error;
+    pendingCheckins.delete(pendingKey);
+    renderWeek();
+    localSyncChannel?.postMessage({ type: "checkin-changed" });
+    scheduleWeekRefresh();
+    if (!shouldRemove) {
+      showDogCelebration(targetStatus);
     }
+  } catch (error) {
+    pendingCheckins.delete(pendingKey);
+    weekCheckinsMap = {
+      ...weekCheckinsMap,
+      [dayKey]: previousUsers
+    };
+    renderWeek();
+    throw error;
   }
-
-  await loadWeekCheckins();
 }
 
 function fileToDataUrl(file) {
@@ -356,11 +457,41 @@ function subscribeRealtime() {
       "postgres_changes",
       { event: "*", schema: "public", table: "lunch_checkins" },
       () => {
-        loadWeekCheckins().catch(() => {});
+        scheduleWeekRefresh();
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        scheduleWeekRefresh(0);
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        scheduleWeekRefresh(500);
+      }
+    });
 }
+
+localSyncChannel?.addEventListener("message", () => {
+  scheduleWeekRefresh(0);
+});
+
+window.addEventListener("focus", () => {
+  scheduleWeekRefresh(0);
+});
+
+window.addEventListener("online", () => {
+  scheduleWeekRefresh(0);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    scheduleWeekRefresh(0);
+  }
+});
+
+window.setInterval(() => {
+  if (document.visibilityState === "visible") {
+    scheduleWeekRefresh(0);
+  }
+}, FALLBACK_REFRESH_MS);
 
 saveProfileBtn.addEventListener("click", () => {
   saveProfile().catch(() => {

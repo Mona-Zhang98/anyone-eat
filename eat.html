@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>今天有人一起吃饭吗~</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="preconnect" href="https://jgbvnsthoniroetieifo.supabase.co" crossorigin />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -45,6 +47,33 @@
       <div id="weekList" class="week-list"></div>
     </section>
   </main>
+
+  <div id="dogCelebration" class="dog-celebration" aria-live="polite" aria-atomic="true" hidden>
+    <div class="dog-card" role="status">
+      <span class="dog-sparkle dog-sparkle-one" aria-hidden="true">✦</span>
+      <span class="dog-sparkle dog-sparkle-two" aria-hidden="true">♥</span>
+      <span class="dog-expression-mark" aria-hidden="true">💢</span>
+      <div class="dog-mascot" aria-hidden="true">
+        <span class="dog-ear dog-ear-left"></span>
+        <span class="dog-ear dog-ear-right"></span>
+        <div class="dog-head">
+          <span class="dog-spot"></span>
+          <span class="dog-eye dog-eye-left"></span>
+          <span class="dog-eye dog-eye-right"></span>
+          <span class="dog-cheek dog-cheek-left"></span>
+          <span class="dog-cheek dog-cheek-right"></span>
+          <span class="dog-muzzle">
+            <span class="dog-nose"></span>
+            <span class="dog-mouth"></span>
+            <span class="dog-tongue"></span>
+          </span>
+        </div>
+        <span class="dog-paw dog-paw-left"></span>
+        <span class="dog-paw dog-paw-right"></span>
+      </div>
+      <p id="dogMessage" class="dog-message"></p>
+    </div>
+  </div>
 
   <template id="dayTemplate">
     <article class="day-item">
