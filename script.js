@@ -17,6 +17,7 @@ const dayTemplate = document.getElementById("dayTemplate");
 const weekdays = ["周一", "周二", "周三", "周四", "周五"];
 let weekCheckinsMap = {};
 const STATUS_LUNCH = "lunch";
+const STATUS_BUSY = "busy";
 const STATUS_VACATION = "vacation";
 
 function getMonday(date = new Date()) {
@@ -158,12 +159,15 @@ function renderUsers(container, users) {
 function splitByStatus(users) {
   const result = {
     lunch: [],
+    busy: [],
     vacation: []
   };
   users.forEach((u) => {
     const status = u.check_status || STATUS_LUNCH;
     if (status === STATUS_VACATION) {
       result.vacation.push(u);
+    } else if (status === STATUS_BUSY) {
+      result.busy.push(u);
     } else {
       result.lunch.push(u);
     }
@@ -187,8 +191,10 @@ function renderWeek() {
     const subtitle = fragment.querySelector(".day-subtitle");
     const vacationBtn = fragment.querySelector(".vacation-btn");
     const lunchBtn = fragment.querySelector(".lunch-btn");
+    const busyBtn = fragment.querySelector(".busy-btn");
     const vacationUsersEl = fragment.querySelector(".vacation-users");
     const lunchUsersEl = fragment.querySelector(".lunch-users");
+    const busyUsersEl = fragment.querySelector(".busy-users");
 
     title.textContent = `${formatDate(date)} ${weekdays[i]}`;
     subtitle.textContent = "午饭团打卡";
@@ -204,6 +210,10 @@ function renderWeek() {
       lunchBtn.classList.add("checked");
       lunchBtn.textContent = "已打卡（再点取消）";
     }
+    if (meRecord && (meRecord.check_status || STATUS_LUNCH) === STATUS_BUSY) {
+      busyBtn.classList.add("checked");
+      busyBtn.textContent = "已有约（再点取消）";
+    }
     vacationBtn.addEventListener("click", () => {
       toggleCheckIn(key, STATUS_VACATION).catch(() => {
         alert("打卡失败，请稍后重试。");
@@ -214,9 +224,15 @@ function renderWeek() {
         alert("打卡失败，请稍后重试。");
       });
     });
+    busyBtn.addEventListener("click", () => {
+      toggleCheckIn(key, STATUS_BUSY).catch(() => {
+        alert("打卡失败，请稍后重试。");
+      });
+    });
 
     renderUsers(vacationUsersEl, grouped.vacation);
     renderUsers(lunchUsersEl, grouped.lunch);
+    renderUsers(busyUsersEl, grouped.busy);
     weekListEl.appendChild(dayItem);
   });
 }

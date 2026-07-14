@@ -196,7 +196,7 @@ input[type="file"] {
 }
 
 .day-right {
-  min-width: 320px;
+  min-width: 520px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -205,31 +205,57 @@ input[type="file"] {
 
 .check-columns {
   display: flex;
-  gap: 6px;
+  gap: 16px;
   width: 100%;
 }
 
 .check-column {
   flex: 1;
+  min-width: 0;
+}
+
+.check-column .btn {
+  width: 100%;
+  display: block;
+  text-align: center;
 }
 
 .lunch-btn {
-  background: #e5f0fb;
-  color: #456a8a;
+  background: #cfe5ff;
+  color: #1f4f80;
+  border: 1px solid #9fc7f2;
 }
 
 .lunch-btn:hover {
-  background: #d8e8f8;
+  background: #bddbff;
 }
 
 .lunch-btn.checked {
-  background: #d9f1e4;
-  color: #2f6d4a;
+  background: #a7d4ff;
+  color: #173f68;
+  border-color: #7fb8ee;
+}
+
+.busy-btn {
+  background: #f0e6fb;
+  color: #64438a;
+  border: 1px solid #c8b2e8;
+}
+
+.busy-btn:hover {
+  background: #e5d7f7;
+}
+
+.busy-btn.checked {
+  background: #e3cdfa;
+  color: #533376;
+  border-color: #b894e3;
 }
 
 .vacation-btn {
   background: #f8eadb;
   color: #8d5d38;
+  border: 1px solid #e6c8a8;
 }
 
 .vacation-btn:hover {
@@ -239,6 +265,7 @@ input[type="file"] {
 .vacation-btn.checked {
   background: #ffe3bd;
   color: #7a4a26;
+  border-color: #e3b880;
 }
 
 .checkin-users {
