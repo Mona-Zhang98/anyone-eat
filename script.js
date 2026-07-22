@@ -1,4 +1,5 @@
 const PROFILE_STORAGE_KEY = "anyone_eat_profile_v2";
+const USER_ID_STORAGE_KEY = "anyone_eat_user_id";
 const SUPABASE_URL = "https://jgbvnsthoniroetieifo.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpnYnZuc3Rob25pcm9ldGllaWZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1OTAxMjUsImV4cCI6MjA5OTE2NjEyNX0.SUF0matM2wjnoDw3UfbO5s4U0bLGQcmSGeaF1AZa5fI";
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -12,6 +13,10 @@ const editProfileBtn = document.getElementById("editProfileBtn");
 const activeUserBox = document.getElementById("activeUserBox");
 const profileDisplay = document.getElementById("profileDisplay");
 const profileEditor = document.getElementById("profileEditor");
+const profileEditorTitle = document.getElementById("profileEditorTitle");
+const profileHelp = document.getElementById("profileHelp");
+const profileStatus = document.getElementById("profileStatus");
+const switchProfileBtn = document.getElementById("switchProfileBtn");
 const dayTemplate = document.getElementById("dayTemplate");
 const dogCelebrationEl = document.getElementById("dogCelebration");
 const dogMessageEl = document.getElementById("dogMessage");
@@ -82,11 +87,10 @@ function currentWeekKey() {
 }
 
 function getOrCreateUserId() {
-  const key = "anyone_eat_user_id";
-  const existing = localStorage.getItem(key);
+  const existing = localStorage.getItem(USER_ID_STORAGE_KEY);
   if (existing) return existing;
   const created = crypto.randomUUID();
-  localStorage.setItem(key, created);
+  localStorage.setItem(USER_ID_STORAGE_KEY, created);
   return created;
 }
 
@@ -104,6 +108,9 @@ function loadProfile() {
     if (!raw) return defaultProfile();
     const parsed = JSON.parse(raw);
     const base = defaultProfile();
+    if (parsed.id) {
+      localStorage.setItem(USER_ID_STORAGE_KEY, parsed.id);
+    }
     return {
       ...base,
       ...parsed,
@@ -115,7 +122,39 @@ function loadProfile() {
 }
 
 function saveProfileLocal() {
+  localStorage.setItem(USER_ID_STORAGE_KEY, state.currentUser.id);
   localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(state.currentUser));
+}
+
+function normalizeUserName(name) {
+  return name.trim().toLowerCase();
+}
+
+function profileFromRow(row) {
+  return {
+    id: row.user_id,
+    name: row.user_name,
+    avatar: row.avatar_url || ""
+  };
+}
+
+function setProfileStatus(message = "", type = "") {
+  profileStatus.textContent = message;
+  profileStatus.className = `profile-status${type ? ` ${type}` : ""}`;
+}
+
+function isMissingProfilesTable(error) {
+  return error?.code === "42P01" || error?.code === "PGRST205";
+}
+
+function friendlyProfileError(error) {
+  if (isMissingProfilesTable(error)) {
+    return "用户资料表尚未配置，请先在 Supabase 运行 supabase_profiles.sql。";
+  }
+  if (error?.code === "23505") {
+    return "这个用户名已经被使用，请换一个名字。";
+  }
+  return "用户资料保存失败，请稍后重试。";
 }
 
 function createAvatar(src, alt) {
@@ -126,12 +165,21 @@ function createAvatar(src, alt) {
   return img;
 }
 
+function openProfileEditor(editing = false) {
+  profileDisplay.classList.add("hidden");
+  profileEditor.classList.remove("hidden");
+  profileEditorTitle.textContent = editing ? "修改用户资料" : "登录或创建用户";
+  profileHelp.textContent = editing
+    ? "修改名字或头像不会改变你的 user_id，历史打卡会自动同步。"
+    : "输入已有用户名会恢复原账户；输入新名字会创建用户。";
+  saveProfileBtn.textContent = editing ? "保存修改" : "继续";
+}
+
 function renderActiveUser() {
   const { name, avatar } = state.currentUser;
   activeUserBox.innerHTML = "";
   if (!name.trim()) {
-    profileDisplay.classList.add("hidden");
-    profileEditor.classList.remove("hidden");
+    openProfileEditor(false);
     return;
   }
   profileDisplay.classList.remove("hidden");
@@ -421,6 +469,122 @@ async function toggleCheckIn(dayKey, targetStatus) {
   }
 }
 
+async function findProfileByName(name) {
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("user_id, user_name, user_name_key, avatar_url, updated_at")
+    .eq("user_name_key", normalizeUserName(name))
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+  return data;
+}
+
+async function findProfileById(userId) {
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("user_id, user_name, user_name_key, avatar_url, updated_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+  return data;
+}
+
+async function upsertProfile(profile) {
+  const { error } = await supabaseClient
+    .from("profiles")
+    .upsert(
+      {
+        user_id: profile.id,
+        user_name: profile.name.trim(),
+        avatar_url: profile.avatar || ""
+      },
+      { onConflict: "user_id" }
+    );
+
+  if (error) {
+    throw error;
+  }
+}
+
+function updateProfileInWeekMap(profile) {
+  const nextMap = {};
+  Object.entries(weekCheckinsMap).forEach(([dayKey, users]) => {
+    nextMap[dayKey] = users.map((user) => (
+      user.user_id === profile.id
+        ? {
+            ...user,
+            user_name: profile.name,
+            avatar_url: profile.avatar || ""
+          }
+        : user
+    ));
+  });
+  weekCheckinsMap = nextMap;
+}
+
+function adoptProfile(row, message = "") {
+  state.currentUser = profileFromRow(row);
+  saveProfileLocal();
+  nameInput.value = state.currentUser.name;
+  avatarInput.value = "";
+  updateProfileInWeekMap(state.currentUser);
+  renderActiveUser();
+  renderWeek();
+  setProfileStatus(message, message ? "success" : "");
+}
+
+function applyRemoteProfile(row) {
+  const editorIsOpen = !profileEditor.classList.contains("hidden");
+  state.currentUser = profileFromRow(row);
+  saveProfileLocal();
+  updateProfileInWeekMap(state.currentUser);
+
+  if (!editorIsOpen) {
+    nameInput.value = state.currentUser.name;
+    renderActiveUser();
+  }
+  renderWeek();
+}
+
+async function refreshCurrentProfile() {
+  if (!state.currentUser.name.trim()) {
+    return;
+  }
+  const remoteProfile = await findProfileById(state.currentUser.id);
+  if (remoteProfile) {
+    applyRemoteProfile(remoteProfile);
+  }
+}
+
+async function initializeProfile() {
+  try {
+    if (!state.currentUser.name.trim()) {
+      const remoteProfile = await findProfileById(state.currentUser.id);
+      if (remoteProfile) {
+        adoptProfile(remoteProfile);
+      }
+      return;
+    }
+
+    const remoteProfile = await findProfileById(state.currentUser.id);
+    if (remoteProfile) {
+      adoptProfile(remoteProfile);
+      return;
+    }
+
+    await upsertProfile(state.currentUser);
+  } catch (error) {
+    console.warn("用户资料后端同步暂不可用。", error);
+    setProfileStatus(friendlyProfileError(error), "error");
+  }
+}
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -433,21 +597,53 @@ function fileToDataUrl(file) {
 async function saveProfile() {
   const name = nameInput.value.trim();
   if (!name) {
-    alert("请输入名字。");
+    setProfileStatus("请输入用户名。", "error");
     return;
   }
 
-  state.currentUser.name = name;
+  saveProfileBtn.disabled = true;
+  setProfileStatus("正在连接用户资料...", "");
 
-  const file = avatarInput.files[0];
-  if (file) {
-    const dataUrl = await fileToDataUrl(file);
-    state.currentUser.avatar = dataUrl;
+  try {
+    const isEditing = Boolean(state.currentUser.name.trim());
+
+    if (!isEditing) {
+      const existingProfile = await findProfileByName(name);
+      if (existingProfile) {
+        adoptProfile(existingProfile, `欢迎回来，${existingProfile.user_name}。`);
+        scheduleWeekRefresh(0);
+        localSyncChannel?.postMessage({ type: "profile-changed" });
+        return;
+      }
+    }
+
+    let avatar = state.currentUser.avatar || "";
+    const file = avatarInput.files[0];
+    if (file) {
+      avatar = await fileToDataUrl(file);
+    }
+
+    const nextProfile = {
+      id: state.currentUser.id,
+      name,
+      avatar
+    };
+
+    await upsertProfile(nextProfile);
+    state.currentUser = nextProfile;
+    saveProfileLocal();
+    avatarInput.value = "";
+    updateProfileInWeekMap(nextProfile);
+    renderActiveUser();
+    renderWeek();
+    localSyncChannel?.postMessage({ type: "profile-changed" });
+    scheduleWeekRefresh(0);
+  } catch (error) {
+    console.error("保存用户资料失败。", error);
+    setProfileStatus(friendlyProfileError(error), "error");
+  } finally {
+    saveProfileBtn.disabled = false;
   }
-
-  saveProfileLocal();
-  renderActiveUser();
-  renderWeek();
 }
 
 function subscribeRealtime() {
@@ -467,23 +663,47 @@ function subscribeRealtime() {
         scheduleWeekRefresh(500);
       }
     });
+
+  supabaseClient
+    .channel("profiles-realtime")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "profiles" },
+      (payload) => {
+        if (payload.new?.user_id === state.currentUser.id) {
+          applyRemoteProfile(payload.new);
+        }
+        scheduleWeekRefresh();
+      }
+    )
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        refreshCurrentProfile().catch(() => {});
+      }
+    });
 }
 
-localSyncChannel?.addEventListener("message", () => {
+localSyncChannel?.addEventListener("message", (event) => {
+  if (event.data?.type === "profile-changed") {
+    refreshCurrentProfile().catch(() => {});
+  }
   scheduleWeekRefresh(0);
 });
 
 window.addEventListener("focus", () => {
   scheduleWeekRefresh(0);
+  refreshCurrentProfile().catch(() => {});
 });
 
 window.addEventListener("online", () => {
   scheduleWeekRefresh(0);
+  refreshCurrentProfile().catch(() => {});
 });
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     scheduleWeekRefresh(0);
+    refreshCurrentProfile().catch(() => {});
   }
 });
 
@@ -494,14 +714,37 @@ window.setInterval(() => {
 }, FALLBACK_REFRESH_MS);
 
 saveProfileBtn.addEventListener("click", () => {
-  saveProfile().catch(() => {
-    alert("头像保存失败，请重试。");
-  });
+  saveProfile();
+});
+
+nameInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    saveProfile();
+  }
 });
 
 editProfileBtn.addEventListener("click", () => {
-  profileDisplay.classList.add("hidden");
-  profileEditor.classList.remove("hidden");
+  nameInput.value = state.currentUser.name;
+  setProfileStatus();
+  openProfileEditor(true);
+  nameInput.focus();
+});
+
+switchProfileBtn.addEventListener("click", () => {
+  const shouldSwitch = window.confirm("切换只会退出当前浏览器中的用户，不会删除后端资料和打卡记录。继续吗？");
+  if (!shouldSwitch) {
+    return;
+  }
+
+  localStorage.removeItem(PROFILE_STORAGE_KEY);
+  localStorage.removeItem(USER_ID_STORAGE_KEY);
+  state.currentUser = defaultProfile();
+  nameInput.value = "";
+  avatarInput.value = "";
+  setProfileStatus();
+  renderActiveUser();
+  renderWeek();
   nameInput.focus();
 });
 
@@ -512,6 +755,7 @@ const state = {
 nameInput.value = state.currentUser.name || "";
 renderActiveUser();
 renderWeek();
+initializeProfile();
 
 loadWeekCheckins().catch(() => {
   alert("连接数据库失败，请确认 Supabase 表和权限策略已创建。");

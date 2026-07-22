@@ -120,7 +120,20 @@ input[type="file"] {
 
 .active-user {
   min-height: 28px;
+  min-width: 0;
+  flex: 1;
   color: var(--text);
+}
+
+.active-user .user-chip {
+  max-width: 100%;
+}
+
+.active-user .user-chip > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .profile-display {
@@ -128,6 +141,33 @@ input[type="file"] {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.profile-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.profile-help,
+.profile-status {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.profile-status:empty {
+  display: none;
+}
+
+.profile-status.success {
+  color: #4f8567;
+}
+
+.profile-status.error {
+  color: #b05a6f;
 }
 
 .profile-editor-row {

@@ -19,22 +19,27 @@
       <section class="user-panel card">
         <div id="profileDisplay" class="profile-display hidden">
           <div id="activeUserBox" class="active-user"></div>
-          <button id="editProfileBtn" class="btn soft">修改</button>
+          <div class="profile-actions">
+            <button id="switchProfileBtn" class="btn soft" type="button">切换用户</button>
+            <button id="editProfileBtn" class="btn soft" type="button">修改</button>
+          </div>
         </div>
 
         <div id="profileEditor" class="profile-editor">
-          <h2>创建用户</h2>
+          <h2 id="profileEditorTitle">登录或创建用户</h2>
+          <p id="profileHelp" class="profile-help">输入已有用户名会恢复原账户；输入新名字会创建用户。</p>
           <div class="profile-editor-row">
             <label>
-              名字
-              <input id="nameInput" type="text" maxlength="20" placeholder="输入你的名字" />
+              用户名
+              <input id="nameInput" type="text" maxlength="20" autocomplete="username" placeholder="输入用户名" />
             </label>
             <label>
               头像
               <input id="avatarInput" type="file" accept="image/*" />
             </label>
-            <button id="saveProfileBtn" class="btn primary">保存</button>
+            <button id="saveProfileBtn" class="btn primary" type="button">保存</button>
           </div>
+          <p id="profileStatus" class="profile-status" aria-live="polite"></p>
         </div>
       </section>
     </div>
