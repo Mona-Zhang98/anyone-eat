@@ -1,5 +1,9 @@
 const PROFILE_STORAGE_KEY = "anyone_eat_profile_v2";
 const USER_ID_STORAGE_KEY = "anyone_eat_user_id";
+const WEEK_CACHE_PREFIX = "anyone_eat_week_cache_v1_";
+const PROFILE_DIRECTORY_CACHE_KEY = "anyone_eat_profile_directory_v1";
+const PROFILE_DIRECTORY_REFRESH_MS = 5 * 60 * 1000;
+const HAD_STORED_USER_ID_AT_STARTUP = Boolean(localStorage.getItem(USER_ID_STORAGE_KEY));
 const SUPABASE_URL = "https://jgbvnsthoniroetieifo.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpnYnZuc3Rob25pcm9ldGllaWZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1OTAxMjUsImV4cCI6MjA5OTE2NjEyNX0.SUF0matM2wjnoDw3UfbO5s4U0bLGQcmSGeaF1AZa5fI";
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -23,15 +27,21 @@ const dogMessageEl = document.getElementById("dogMessage");
 
 const weekdays = ["周一", "周二", "周三", "周四", "周五"];
 let weekCheckinsMap = {};
+let profileDirectoryMap = new Map();
 const STATUS_LUNCH = "lunch";
 const STATUS_BUSY = "busy";
 const STATUS_VACATION = "vacation";
-const FALLBACK_REFRESH_MS = 8000;
+const FALLBACK_REFRESH_MS = 15000;
 const pendingCheckins = new Set();
 const localSyncChannel = "BroadcastChannel" in window
   ? new BroadcastChannel("anyone-eat-checkins")
   : null;
-let loadRequestId = 0;
+let weekLoadPromise = null;
+let weekReloadQueued = false;
+let profileDirectoryPromise = null;
+let profileDirectoryLoadedAt = 0;
+let profileDirectoryIsComplete = false;
+let localMutationVersion = 0;
 let refreshTimer = null;
 let dogAnimationTimer = null;
 
@@ -153,6 +163,9 @@ function friendlyProfileError(error) {
   }
   if (error?.code === "23505") {
     return "这个用户名已经被使用，请换一个名字。";
+  }
+  if (error?.code === "AVATAR_TOO_LARGE") {
+    return "头像文件过大，请选择 8MB 以内的图片。";
   }
   return "用户资料保存失败，请稍后重试。";
 }
@@ -328,30 +341,185 @@ function rebuildWeekMap(rows) {
   weekCheckinsMap = map;
 }
 
-async function loadWeekCheckins() {
-  const requestId = ++loadRequestId;
-  const days = getWeekDays();
-  const start = dateKey(days[0]);
-  const end = dateKey(days[4]);
+function mergeProfileData(rows) {
+  return rows.map((row) => {
+    const profile = profileDirectoryMap.get(row.user_id);
+    return {
+      ...row,
+      user_name: profile?.user_name || row.user_name,
+      avatar_url: profile?.avatar_url || row.avatar_url || ""
+    };
+  });
+}
 
-  const { data, error } = await supabaseClient
-    .from("lunch_checkins")
-    .select("id, week_key, check_date, user_id, user_name, avatar_url, check_status, created_at")
-    .eq("week_key", currentWeekKey())
-    .gte("check_date", start)
-    .lte("check_date", end)
-    .order("created_at", { ascending: true });
-
-  if (error) {
-    throw error;
+function restoreProfileDirectoryFromCache() {
+  try {
+    const raw = localStorage.getItem(PROFILE_DIRECTORY_CACHE_KEY);
+    if (!raw) return;
+    const cached = JSON.parse(raw);
+    const rows = Array.isArray(cached) ? cached : cached.rows;
+    if (!Array.isArray(rows)) return;
+    profileDirectoryMap = new Map(rows.map((row) => [row.user_id, row]));
+    profileDirectoryIsComplete = Array.isArray(cached) ? true : cached.complete !== false;
+    profileDirectoryLoadedAt = Array.isArray(cached)
+      ? 0
+      : new Date(cached.cached_at || 0).getTime();
+  } catch {
+    profileDirectoryMap = new Map();
   }
+}
 
-  if (requestId !== loadRequestId) {
+function saveProfileDirectoryToCache() {
+  try {
+    localStorage.setItem(
+      PROFILE_DIRECTORY_CACHE_KEY,
+      JSON.stringify({
+        rows: [...profileDirectoryMap.values()],
+        complete: profileDirectoryIsComplete,
+        cached_at: new Date(profileDirectoryLoadedAt || Date.now()).toISOString()
+      })
+    );
+  } catch (error) {
+    console.warn("用户头像缓存写入失败。", error);
+  }
+}
+
+function applyProfileDirectoryToWeek() {
+  const nextMap = {};
+  Object.entries(weekCheckinsMap).forEach(([dayKey, users]) => {
+    nextMap[dayKey] = mergeProfileData(users);
+  });
+  weekCheckinsMap = nextMap;
+  saveWeekToCache(Object.values(nextMap).flat());
+  renderWeek();
+}
+
+function rememberProfileRow(row) {
+  if (!row?.user_id) return;
+  profileDirectoryMap.set(row.user_id, {
+    user_id: row.user_id,
+    user_name: row.user_name,
+    avatar_url: row.avatar_url || "",
+    updated_at: row.updated_at || new Date().toISOString()
+  });
+  if (profileDirectoryIsComplete) {
+    profileDirectoryLoadedAt = Date.now();
+  }
+  saveProfileDirectoryToCache();
+  applyProfileDirectoryToWeek();
+}
+
+async function refreshProfileDirectory(force = false) {
+  const cacheIsFresh = profileDirectoryIsComplete
+    && profileDirectoryMap.size > 0
+    && Date.now() - profileDirectoryLoadedAt < PROFILE_DIRECTORY_REFRESH_MS;
+  if (!force && cacheIsFresh) {
     return;
   }
 
-  rebuildWeekMap(data || []);
-  renderWeek();
+  if (profileDirectoryPromise) {
+    return profileDirectoryPromise;
+  }
+
+  profileDirectoryPromise = (async () => {
+    const { data, error } = await supabaseClient
+      .from("profiles")
+      .select("user_id, user_name, avatar_url, updated_at")
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    profileDirectoryMap = new Map((data || []).map((row) => [row.user_id, row]));
+    profileDirectoryLoadedAt = Date.now();
+    profileDirectoryIsComplete = true;
+    saveProfileDirectoryToCache();
+    applyProfileDirectoryToWeek();
+  })();
+
+  try {
+    return await profileDirectoryPromise;
+  } finally {
+    profileDirectoryPromise = null;
+  }
+}
+
+function weekCacheKey() {
+  return `${WEEK_CACHE_PREFIX}${currentWeekKey()}`;
+}
+
+function restoreWeekFromCache() {
+  try {
+    const raw = localStorage.getItem(weekCacheKey());
+    if (!raw) return false;
+    const cached = JSON.parse(raw);
+    if (!Array.isArray(cached.rows)) return false;
+    rebuildWeekMap(mergeProfileData(cached.rows));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function saveWeekToCache(rows) {
+  try {
+    const lightweightRows = rows.map(({ avatar_url, ...row }) => row);
+    localStorage.setItem(weekCacheKey(), JSON.stringify({
+      rows: lightweightRows,
+      cached_at: new Date().toISOString()
+    }));
+  } catch (error) {
+    console.warn("本周打卡缓存写入失败。", error);
+  }
+}
+
+async function loadWeekCheckins() {
+  if (weekLoadPromise) {
+    weekReloadQueued = true;
+    return weekLoadPromise;
+  }
+
+  const mutationVersionAtStart = localMutationVersion;
+  weekLoadPromise = (async () => {
+    const days = getWeekDays();
+    const start = dateKey(days[0]);
+    const end = dateKey(days[4]);
+
+    const { data, error } = await supabaseClient
+      .from("lunch_checkins")
+      .select("id, week_key, check_date, user_id, user_name, check_status, created_at")
+      .eq("week_key", currentWeekKey())
+      .gte("check_date", start)
+      .lte("check_date", end)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    if (mutationVersionAtStart !== localMutationVersion) {
+      return;
+    }
+
+    const rows = mergeProfileData(data || []);
+    rebuildWeekMap(rows);
+    saveWeekToCache(rows);
+    renderWeek();
+    refreshProfileDirectory().catch((profileError) => {
+      console.warn("用户头像后台刷新失败。", profileError);
+    });
+  })();
+
+  try {
+    return await weekLoadPromise;
+  } finally {
+    weekLoadPromise = null;
+    if (weekReloadQueued) {
+      weekReloadQueued = false;
+      scheduleWeekRefresh(0);
+    }
+  }
 }
 
 function dayKeyForUser(dayKey) {
@@ -415,7 +583,7 @@ async function toggleCheckIn(dayKey, targetStatus) {
   }
 
   pendingCheckins.add(pendingKey);
-  loadRequestId += 1;
+  localMutationVersion += 1;
   applyOptimisticCheckin(dayKey, targetStatus, shouldRemove);
 
   try {
@@ -465,6 +633,7 @@ async function toggleCheckIn(dayKey, targetStatus) {
       [dayKey]: previousUsers
     };
     renderWeek();
+    scheduleWeekRefresh();
     throw error;
   }
 }
@@ -526,9 +695,11 @@ function updateProfileInWeekMap(profile) {
     ));
   });
   weekCheckinsMap = nextMap;
+  saveWeekToCache(Object.values(nextMap).flat());
 }
 
 function adoptProfile(row, message = "") {
+  rememberProfileRow(row);
   state.currentUser = profileFromRow(row);
   saveProfileLocal();
   nameInput.value = state.currentUser.name;
@@ -541,6 +712,7 @@ function adoptProfile(row, message = "") {
 
 function applyRemoteProfile(row) {
   const editorIsOpen = !profileEditor.classList.contains("hidden");
+  rememberProfileRow(row);
   state.currentUser = profileFromRow(row);
   saveProfileLocal();
   updateProfileInWeekMap(state.currentUser);
@@ -565,6 +737,9 @@ async function refreshCurrentProfile() {
 async function initializeProfile() {
   try {
     if (!state.currentUser.name.trim()) {
+      if (!HAD_STORED_USER_ID_AT_STARTUP) {
+        return;
+      }
       const remoteProfile = await findProfileById(state.currentUser.id);
       if (remoteProfile) {
         adoptProfile(remoteProfile);
@@ -586,9 +761,27 @@ async function initializeProfile() {
 }
 
 function fileToDataUrl(file) {
+  if (file.size > 8 * 1024 * 1024) {
+    return Promise.reject({ code: "AVATAR_TOO_LARGE" });
+  }
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const maxSize = 160;
+        const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext("2d");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/webp", 0.82));
+      };
+      image.onerror = reject;
+      image.src = reader.result;
+    };
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
@@ -631,6 +824,11 @@ async function saveProfile() {
 
     await upsertProfile(nextProfile);
     state.currentUser = nextProfile;
+    rememberProfileRow({
+      user_id: nextProfile.id,
+      user_name: nextProfile.name,
+      avatar_url: nextProfile.avatar
+    });
     saveProfileLocal();
     avatarInput.value = "";
     updateProfileInWeekMap(nextProfile);
@@ -672,6 +870,8 @@ function subscribeRealtime() {
       (payload) => {
         if (payload.new?.user_id === state.currentUser.id) {
           applyRemoteProfile(payload.new);
+        } else if (payload.new) {
+          rememberProfileRow(payload.new);
         }
         scheduleWeekRefresh();
       }
@@ -754,6 +954,8 @@ const state = {
 
 nameInput.value = state.currentUser.name || "";
 renderActiveUser();
+restoreProfileDirectoryFromCache();
+restoreWeekFromCache();
 renderWeek();
 initializeProfile();
 
