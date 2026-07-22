@@ -44,6 +44,7 @@ let profileDirectoryIsComplete = false;
 let localMutationVersion = 0;
 let refreshTimer = null;
 let dogAnimationTimer = null;
+let profileSaveInProgress = false;
 
 function getMonday(date = new Date()) {
   const d = new Date(date);
@@ -710,6 +711,12 @@ function adoptProfile(row, message = "") {
   setProfileStatus(message, message ? "success" : "");
 }
 
+function finishExistingProfileLogin(profile) {
+  adoptProfile(profile, `欢迎回来，${profile.user_name}。`);
+  scheduleWeekRefresh(0);
+  localSyncChannel?.postMessage({ type: "profile-changed" });
+}
+
 function applyRemoteProfile(row) {
   const editorIsOpen = !profileEditor.classList.contains("hidden");
   rememberProfileRow(row);
@@ -788,24 +795,26 @@ function fileToDataUrl(file) {
 }
 
 async function saveProfile() {
+  if (profileSaveInProgress) {
+    return;
+  }
+
   const name = nameInput.value.trim();
   if (!name) {
     setProfileStatus("请输入用户名。", "error");
     return;
   }
 
+  profileSaveInProgress = true;
   saveProfileBtn.disabled = true;
   setProfileStatus("正在连接用户资料...", "");
+  const isEditing = Boolean(state.currentUser.name.trim());
 
   try {
-    const isEditing = Boolean(state.currentUser.name.trim());
-
     if (!isEditing) {
       const existingProfile = await findProfileByName(name);
       if (existingProfile) {
-        adoptProfile(existingProfile, `欢迎回来，${existingProfile.user_name}。`);
-        scheduleWeekRefresh(0);
-        localSyncChannel?.postMessage({ type: "profile-changed" });
+        finishExistingProfileLogin(existingProfile);
         return;
       }
     }
@@ -837,9 +846,26 @@ async function saveProfile() {
     localSyncChannel?.postMessage({ type: "profile-changed" });
     scheduleWeekRefresh(0);
   } catch (error) {
-    console.error("保存用户资料失败。", error);
-    setProfileStatus(friendlyProfileError(error), "error");
+    let finalError = error;
+
+    // 登录时如果首次查询短暂漏掉已有用户，创建请求会被唯一索引拦住。
+    // 此时再次查询并恢复原账号，不应把它误报成“用户名已被使用”。
+    if (!isEditing && error?.code === "23505") {
+      try {
+        const existingProfile = await findProfileByName(name);
+        if (existingProfile) {
+          finishExistingProfileLogin(existingProfile);
+          return;
+        }
+      } catch (lookupError) {
+        finalError = lookupError;
+      }
+    }
+
+    console.error("保存用户资料失败。", finalError);
+    setProfileStatus(friendlyProfileError(finalError), "error");
   } finally {
+    profileSaveInProgress = false;
     saveProfileBtn.disabled = false;
   }
 }
